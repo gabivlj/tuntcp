@@ -1,0 +1,1 @@
+sudo ip netns exec red tshark -i tun0 -f "tcp"
