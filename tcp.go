@@ -135,14 +135,13 @@ func (t *tcpHandle) handle(p gopacket.Packet) {
 					return
 				}
 
-				fmt.Println("syn received///")
 				session.state = SynReceived
 				continue
 			case SynReceived:
 				session.state = Established
 				fmt.Println("established, their ack number:", packet.transport.Ack, "our nxt:", session.sendSequenceState.NXT)
 			default:
-				fmt.Println("established, their ack number:", packet.transport.Ack, packet.transport.Seq, string(packet.transport.Payload), "our nxt:", session.sendSequenceState.NXT)
+				fmt.Println("established, their ack number:", packet.transport.Ack, "seq:", packet.transport.Seq, "our nxt:", session.sendSequenceState.NXT, "payload:", string(packet.transport.Payload))
 				fmt.Println("more info:", packet.transport.ACK, packet.transport.SYN)
 				log.Printf("error: state not handled yet (state=%d)\n", session.state)
 			}
@@ -177,7 +176,7 @@ func (s *session) close() {
 }
 
 func (t *tcpHandle) sendHandshake(session *session, packet *tcpPacket) error {
-	session.receiveSequenceState.NXT = packet.transport.Seq
+	session.receiveSequenceState.NXT = packet.transport.Seq + 1
 	session.receiveSequenceState.WND = packet.transport.Window
 	session.receiveSequenceState.IRS = packet.transport.Seq
 
@@ -197,7 +196,7 @@ func (t *tcpHandle) sendHandshake(session *session, packet *tcpPacket) error {
 		EthernetType: layers.EthernetTypeIPv4,
 	}
 	ip := layers.IPv4{
-		SrcIP:    t.ipv4,
+		SrcIP:    packet.ip.DstIP,
 		DstIP:    packet.ip.SrcIP,
 		Protocol: layers.IPProtocolTCP,
 		Version:  4,
@@ -212,13 +211,15 @@ func (t *tcpHandle) sendHandshake(session *session, packet *tcpPacket) error {
 		Seq:     session.sendSequenceState.NXT,
 		Ack:     session.receiveSequenceState.NXT,
 	}
-	gopacket.SerializeLayers(buf, opts, &eth, &ip, &tcp)
-	n, err := t.ifn.Write(buf.Bytes())
+	tcp.SetNetworkLayerForChecksum(&ip)
+	gopacket.SerializeLayers(buf, opts, &eth, &ip, &tcp, gopacket.Payload([]byte{}))
+	bytes := buf.Bytes()
+	n, err := t.ifn.Write(bytes)
 	if err != nil {
 		return fmt.Errorf("unable to send buffer: %w", err)
 	}
 
-	if n != len(buf.Bytes()) {
+	if n != len(bytes) {
 		return fmt.Errorf("number of bytes sent (%d) doesn't match the number of serialised bytes (%d)", n, len(buf.Bytes()))
 	}
 
